@@ -1337,11 +1337,23 @@ NVENCSTATUS CNvHWEncoder::ProcessOutput(const EncodeBuffer *pEncodeBuffer)
     lockBitstreamData.doNotWait = false;
 	printf("lockBitstreamData.bitstreamSizeInBytes = %u \n", lockBitstreamData.bitstreamSizeInBytes);
     nvStatus = m_pEncodeAPI->nvEncLockBitstream(m_hEncoder, &lockBitstreamData);
+	void *ptr = NULL;
     if (nvStatus == NV_ENC_SUCCESS)
     {
 		printf("fwrite... \n");
+		int count = lockBitstreamData.bitstreamSizeInBytes;
+		byte *outputData = new byte[count];
+		memcpy(outputData, lockBitstreamData.bitstreamBufferPtr, lockBitstreamData.bitstreamSizeInBytes);
+		
+		for (int i = 0; i < 20; i++)
+		{
+			printf("lockBitstreamData.bitstreamBufferPtr = %u \n", *(outputData + i));
+		}
+		
         fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_fOutput);
         nvStatus = m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
+
+		delete(outputData);
     }
     else
     {

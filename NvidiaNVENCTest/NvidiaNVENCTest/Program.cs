@@ -79,7 +79,7 @@ namespace NvidiaNVENCTest
                     MF_SOURCE_READER_FLAG pdwStreamFlags = MF_SOURCE_READER_FLAG.None;
                     long pllTimestamp;
                     IMFSample ppSample;
-                    Guid temp;
+                    //Guid temp;
 
                     IMFMediaType mediaType;
                     MFExtern.MFCreateMediaType(out mediaType);
@@ -108,7 +108,7 @@ namespace NvidiaNVENCTest
                     Console.WriteLine("Initialize NvEncoder");
 
                     bool result = true;
-                    result = nvEncoder.InitializeNvEncoder(MFMediaType.NV12, 1920, 1080, 30);
+                    result = nvEncoder.InitializeNvEncoder(MFMediaType.NV12, 1920, 1088, 30);
                     //byte[] inputData = null;
                     //byte[] outputData = null;
                     //IntPtr outputData = IntPtr.Zero;
@@ -140,6 +140,7 @@ namespace NvidiaNVENCTest
                                 while(true)
                                 { 
                                     processResult = nvEncoder.ProcessData(null, 1920, 1088, out outputData);
+
                                     if (outputData != null)
                                     {
                                         ByteArrayToFile(outputData);
@@ -148,6 +149,7 @@ namespace NvidiaNVENCTest
                                         break;
                                 }
                                 StopByteArrayToFile();
+                                nvEncoder.FinalizeEncoder();
                                 break;
                             }
 
@@ -160,6 +162,7 @@ namespace NvidiaNVENCTest
 
                                 if (outputData != null)
                                 {
+                                    Console.WriteLine(outputData[4]);
                                     ByteArrayToFile(outputData);
                                 }
 
@@ -202,7 +205,7 @@ namespace NvidiaNVENCTest
 
         static System.IO.FileStream sFileStream = null;
         static bool sIsInitialize = false;
-        static bool sIsStartRecording = false;
+        //static bool sIsStartRecording = false;
         static private bool ByteArrayToFile(byte[] byteArray)
         {
             try
@@ -229,8 +232,8 @@ namespace NvidiaNVENCTest
         {
             try
             {
-                sIsInitialize = false;
-                sIsStartRecording = false;
+                //sIsInitialize = false;
+                //sIsStartRecording = false;
                 //StopCapturing();
                 sFileStream.Close();
                 sFileStream = null;
@@ -255,7 +258,7 @@ namespace NvidiaNVENCTest
                     sFileStream = new System.IO.FileStream(fileName, System.IO.FileMode.Create,
                                                System.IO.FileAccess.Write);
                     sIsInitialize = true;
-                    sIsStartRecording = true;
+                    //sIsStartRecording = true;
 
                     return true;
                 }

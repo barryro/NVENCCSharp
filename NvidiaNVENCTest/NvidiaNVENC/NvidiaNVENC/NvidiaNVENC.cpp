@@ -504,16 +504,16 @@ NVENCSTATUS CNvEncoder::FlushEncoder2(NV_ENC_LOCK_BITSTREAM &lockBitstreamData, 
 		m_pNvHWEncoder->ProcessOutput2(pEncodeBufer, lockBitstreamData);
 	else
 	{
-	#if defined(NV_WINDOWS)
-	if (m_stEncoderInput.enableAsyncMode)
-	{
-		if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
-		{
-			assert(0);
-			NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
-		}
-	}
-	#endif 
+//#if defined(NV_WINDOWS)
+//		if (m_stEncoderInput.enableAsyncMode)
+//		{
+//			if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
+//			{
+//				assert(0);
+//				NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
+//			}
+//		}
+//#endif 
 		stop = true;
 	}
 	//	pEncodeBufer = m_EncodeBufferQueue.GetPending();
@@ -530,6 +530,8 @@ NVENCSTATUS CNvEncoder::NvEncFlushEncoderQueue()
 		assert(0);
 		return nvStatus;
 	}
+
+	return nvStatus;
 }
 
 NVENCSTATUS CNvEncoder::Deinitialize(uint32_t devicetype)
@@ -556,13 +558,13 @@ NVENCSTATUS CNvEncoder::Deinitialize(uint32_t devicetype)
 			((IDirect3DDevice9*)(m_pDevice))->Release();
 			break;
 
-		/*case NV_ENC_DX10:
+		case NV_ENC_DX10:
 			((ID3D10Device*)(m_pDevice))->Release();
 			break;
 
 		case NV_ENC_DX11:
 			((ID3D11Device*)(m_pDevice))->Release();
-			break;*/
+			break;
 #endif
 
 		case NV_ENC_CUDA:
@@ -620,9 +622,17 @@ NVENCSTATUS loadframe(uint8_t *yuvInput[3], HANDLE hInputYUVFile, uint32_t frmId
 	{
 		return NV_ENC_ERR_INVALID_PARAM;
 	}
+
+	printf("anFrameSize[0] = %i \n", anFrameSize[0]);
+	printf("anFrameSize[1] = %i \n", anFrameSize[1]);
+	printf("anFrameSize[2] = %i \n", anFrameSize[2]);
+
 	nvReadFile(hInputYUVFile, yuvInput[0], anFrameSize[0], &numBytesRead, NULL);
+	printf("numBytesRead = %i \n", numBytesRead);
 	nvReadFile(hInputYUVFile, yuvInput[1], anFrameSize[1], &numBytesRead, NULL);
+	printf("numBytesRead = %i \n", numBytesRead);
 	nvReadFile(hInputYUVFile, yuvInput[2], anFrameSize[2], &numBytesRead, NULL);
+	printf("numBytesRead = %i \n", numBytesRead);
 	return NV_ENC_SUCCESS;
 }
 
@@ -674,11 +684,28 @@ NVENCSTATUS loadframe2(byte *inputData, uint8_t *yuvInput[3], uint32_t width, ui
 		*(yuvInput[0] + i) = *(inputData + i);
 	}
 
-	for (int i = 0; i < anFrameSize[1]; i++)
+	int u = 0, v = 0;
+	for (int i = 0; i < anFrameSize[1] + anFrameSize[2]; i++)
 	{
-		*(yuvInput[1]+ i) = *(inputData + i + anFrameSize[1]);
-		*(yuvInput[2] + i) = *(inputData + i + anFrameSize[1] + anFrameSize[1]);
+		/*if (i == 0)
+			*(yuvInput[1] + ++u) = *(inputData + i + anFrameSize[0]);
+		else
+		{*/
+			if ((i % 2) == 0)
+			{
+				*(yuvInput[1] + ++u) = *(inputData + i + anFrameSize[0]);
+			}
+			else
+			{
+				*(yuvInput[2] + ++v) = *(inputData + i + anFrameSize[0]);
+			}	
+		//}
 	}
+
+	/*for (int i = 0; i < anFrameSize[2]; i++)
+	{
+		*(yuvInput[2] + i) = *(inputData + i + anFrameSize[0] + anFrameSize[1]);
+	}*/
 
 	/*for (int i = 0; i < anFrameSize[0]; i++)
 	{
@@ -1732,7 +1759,9 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 	if (inputData)
 	{
 		loadframe2(inputData, yuv, width, height, numBytesRead, m_encodeConfig.inputFormat);
-	
+		
+		delete(inputData);
+
 		EncodeFrameConfig stEncodeFrame;
 		memset(&stEncodeFrame, 0, sizeof(stEncodeFrame));
 		stEncodeFrame.yuv[0] = yuv[0];
@@ -1805,7 +1834,6 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 		}
 	}
 
-
 	//For output testing
 	//*outputData = new byte[20];
 	////memset(outputData, 2, sizeof(outputData));
@@ -1819,7 +1847,7 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 
 bool CNvEncoder::EndOfProcessData()
 {
-	int result = false;
+	bool result = false;
 	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
 	NV_ENC_LOCK_BITSTREAM lockBitstreamData;
 	memset(&lockBitstreamData, 0, sizeof(lockBitstreamData));
@@ -1830,6 +1858,28 @@ bool CNvEncoder::EndOfProcessData()
 	if (nvStatus == NV_ENC_SUCCESS)
 		result =  true;
 
+	return result;
+}
+
+bool CNvEncoder::FinalizeEncoder()
+{
+	bool result = false;
+	NVENCSTATUS nvStatus;
+
+#if defined(NV_WINDOWS)
+	if (m_stEncoderInput.enableAsyncMode)
+	{
+		if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
+		{
+			assert(0);
+			NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
+		}
+	}
+#endif 
+
+	nvStatus = Deinitialize(m_encodeConfig.deviceType);
+	if (nvStatus == NV_ENC_SUCCESS)
+		result = true;
 	return result;
 }
 
@@ -1891,6 +1941,7 @@ namespace NvidiaNVENC
 	{
 		uint16_t sizeOfOutput = 0;
 		unsigned char *outputBuf = NULL /*= new unsigned char[outputData->Length]*/;
+		NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
 
 		if (inputData)
 		{
@@ -1898,7 +1949,7 @@ namespace NvidiaNVENC
 			Marshal::Copy(inputData, 0, IntPtr(inputBuf), inputData->Length);
 			//Marshal::Copy(outputData, 0, IntPtr(outputBuf), outputData->Length);
 
-			NVENCSTATUS nvstatus = m_nvEncoder->ProcessData(inputBuf, width, height, &outputBuf, sizeOfOutput);
+			nvStatus = m_nvEncoder->ProcessData(inputBuf, width, height, &outputBuf, sizeOfOutput);
 			if (outputBuf)
 			{
 				//int size = sizeof(*outputBuf);
@@ -1906,16 +1957,17 @@ namespace NvidiaNVENC
 			
 				Marshal::Copy(IntPtr(outputBuf), outputData, 0, sizeOfOutput);
 
+				delete(outputBuf);
+
 				//for (int i = 0; i < 20; i++)
 				//{
 				//	printf("outputBuf = %u \n", *(outputBuf + i));
 				//}
 			}
-			return nvstatus;
 		}
 		else
 		{
-			NVENCSTATUS nvstatus = m_nvEncoder->ProcessData(NULL, width, height, &outputBuf, sizeOfOutput);
+			nvStatus = m_nvEncoder->ProcessData(NULL, width, height, &outputBuf, sizeOfOutput);
 			
 			if (outputBuf)
 			{
@@ -1928,17 +1980,27 @@ namespace NvidiaNVENC
 				//{
 				//	printf("outputBuf = %u \n", *(outputBuf + i));
 				//}
-			}
 
-			return nvstatus;
+				delete(outputBuf);
+			}
 		}
-		
-		//byte* pData = new byte[nSampleSize];
+		return nvStatus;
 	}
 
 	bool NvEncoder::EndOfProcessData()
 	{
-		return m_nvEncoder->NvEncFlushEncoderQueue();
+		bool result = false;
+		NVENCSTATUS nvstatus = m_nvEncoder->NvEncFlushEncoderQueue();
+
+		if (nvstatus == NV_ENC_SUCCESS)
+			result = true;
+
+		return result;
+	}
+
+	bool NvEncoder::FinalizeEncoder()
+	{
+		return m_nvEncoder->FinalizeEncoder();
 	}
 
 	bool NvEncoder::GetAPIFromManaged(IntPtr intPtr, IntPtr proc)

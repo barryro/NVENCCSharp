@@ -131,6 +131,7 @@ public:
 	bool EndOfProcessData();
 	NVENCSTATUS FlushEncoder2(NV_ENC_LOCK_BITSTREAM &lockBitstreamData, bool &stop);
 	NVENCSTATUS NvEncFlushEncoderQueue();
+	bool FinalizeEncoder();
 protected:
 	CNvHWEncoder                                        *m_pNvHWEncoder;
 	uint32_t                                             m_uEncodeBufferCount;
@@ -201,6 +202,7 @@ namespace NvidiaNVENC {
 		bool InitializeNvEncoder(Guid inputFormat, int width, int height, int frameRate);
 		int ProcessData(array<System::Byte> ^inputData, int width, int height, [Out] array<System::Byte> ^%outputData);
 		bool EndOfProcessData();
+		bool FinalizeEncoder();
 
 	private:
 		//void *m_nvEncoder;
