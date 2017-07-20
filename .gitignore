@@ -3,3 +3,14 @@ obj/
 Debug/
 Release/
 Output/
+*.obj
+*.config
+*.pdb
+*.tlog
+*.log
+*.pch
+*.sdf
+*.suo
+*.res
+*.cache
+*.user

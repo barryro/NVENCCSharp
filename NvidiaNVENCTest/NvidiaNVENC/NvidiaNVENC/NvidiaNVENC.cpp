@@ -1,4 +1,8 @@
-// This is the main DLL file.
+////////////////////////////////////////////////////////////////////////////
+// Hereby to notify that
+//  "This library contains source code provided by NVIDIA Corporation."
+//														2017/07/17 Barry
+////////////////////////////////////////////////////////////////////////////
 
 //#include "stdafx.h"
 
@@ -9,6 +13,7 @@
 #include "../common/inc/nvFileIO.h"
 #include <new>
 #include <string>
+//#include <ctime>
 //#include "Mmsystem.h"
 
 #define BITSTREAM_BUFFER_SIZE 2 * 1024 * 1024
@@ -111,6 +116,9 @@ CNvEncoder::CNvEncoder()
 	memset(&m_stEOSOutputBfr, 0, sizeof(m_stEOSOutputBfr));
 	memset(&m_stMVBuffer, 0, sizeof(m_stMVBuffer));
 	memset(&m_stEncodeBuffer, 0, sizeof(m_stEncodeBuffer));
+
+	//20170628
+	m_firstFrame = true;
 }
 
 CNvEncoder::~CNvEncoder()
@@ -141,7 +149,7 @@ NVENCSTATUS CNvEncoder::InitCuda(uint32_t deviceID)
 	if (cuResult != CUDA_SUCCESS)
 	{
 		PRINTERR("cuInit error:0x%x\n", cuResult);
-		assert(0);
+		//assert(0);
 		return NV_ENC_ERR_NO_ENCODE_DEVICE;
 	}
 
@@ -149,7 +157,7 @@ NVENCSTATUS CNvEncoder::InitCuda(uint32_t deviceID)
 	if (cuResult != CUDA_SUCCESS)
 	{
 		PRINTERR("cuDeviceGetCount error:0x%x\n", cuResult);
-		assert(0);
+		//assert(0);
 		return NV_ENC_ERR_NO_ENCODE_DEVICE;
 	}
 
@@ -189,7 +197,7 @@ NVENCSTATUS CNvEncoder::InitCuda(uint32_t deviceID)
 	if (cuResult != CUDA_SUCCESS)
 	{
 		PRINTERR("cuCtxCreate error:0x%x\n", cuResult);
-		assert(0);
+		//assert(0);
 		return NV_ENC_ERR_NO_ENCODE_DEVICE;
 	}
 
@@ -197,7 +205,7 @@ NVENCSTATUS CNvEncoder::InitCuda(uint32_t deviceID)
 	if (cuResult != CUDA_SUCCESS)
 	{
 		PRINTERR("cuCtxPopCurrent error:0x%x\n", cuResult);
-		assert(0);
+		//assert(0);
 		return NV_ENC_ERR_NO_ENCODE_DEVICE;
 	}
 	return NV_ENC_SUCCESS;
@@ -522,6 +530,34 @@ NVENCSTATUS CNvEncoder::FlushEncoder2(NV_ENC_LOCK_BITSTREAM &lockBitstreamData, 
 	return nvStatus;
 }
 
+NVENCSTATUS CNvEncoder::FlushEncoder3(byte **outputData, uint32_t &outputDataSize, uint64_t &outputTimeStamp, bool &isKey, bool &stop)
+{
+	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+	stop = false;
+	EncodeBuffer *pEncodeBufer = m_EncodeBufferQueue.GetPending();
+
+	if (pEncodeBufer)
+	{
+		m_pNvHWEncoder->ProcessOutput3(pEncodeBufer, outputData, outputDataSize, outputTimeStamp, isKey);
+	}
+	else
+	{
+#if defined(NV_WINDOWS)
+		if (m_stEncoderInput.enableAsyncMode)
+		{
+			if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
+			{
+				assert(0);
+				NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
+			}
+		}
+#endif 
+		stop = true;
+	}
+
+	return nvStatus;
+}
+
 NVENCSTATUS CNvEncoder::NvEncFlushEncoderQueue()
 {
 	NVENCSTATUS nvStatus = m_pNvHWEncoder->NvEncFlushEncoderQueue(m_stEOSOutputBfr.hOutputEvent);
@@ -636,7 +672,7 @@ NVENCSTATUS loadframe(uint8_t *yuvInput[3], HANDLE hInputYUVFile, uint32_t frmId
 	return NV_ENC_SUCCESS;
 }
 
-NVENCSTATUS loadframe2(byte *inputData, uint8_t *yuvInput[3], uint32_t width, uint32_t height, uint32_t &numBytesRead, NV_ENC_BUFFER_FORMAT inputFormat)
+NVENCSTATUS loadframe2(byte *inputData, uint8_t *yuvInput[3], uint32_t width, uint32_t height, NV_ENC_BUFFER_FORMAT inputFormat)
 {
 	//uint64_t fileOffset;
 	//uint32_t result;
@@ -687,21 +723,17 @@ NVENCSTATUS loadframe2(byte *inputData, uint8_t *yuvInput[3], uint32_t width, ui
 	int u = 0, v = 0;
 	for (int i = 0; i < anFrameSize[1] + anFrameSize[2]; i++)
 	{
-		/*if (i == 0)
-			*(yuvInput[1] + ++u) = *(inputData + i + anFrameSize[0]);
+		if ((i % 2) == 0)
+		{
+			*(yuvInput[1] + u++) = *(inputData + i + anFrameSize[0]);
+		}
 		else
-		{*/
-			if ((i % 2) == 0)
-			{
-				*(yuvInput[1] + ++u) = *(inputData + i + anFrameSize[0]);
-			}
-			else
-			{
-				*(yuvInput[2] + ++v) = *(inputData + i + anFrameSize[0]);
-			}	
-		//}
+		{
+			*(yuvInput[2] + v++) = *(inputData + i + anFrameSize[0]);
+		}	
 	}
 
+	delete[] inputData;
 	/*for (int i = 0; i < anFrameSize[2]; i++)
 	{
 		*(yuvInput[2] + i) = *(inputData + i + anFrameSize[0] + anFrameSize[1]);
@@ -710,20 +742,7 @@ NVENCSTATUS loadframe2(byte *inputData, uint8_t *yuvInput[3], uint32_t width, ui
 	/*for (int i = 0; i < anFrameSize[0]; i++)
 	{
 		printf("yuvInput[0] = %u \n", *(yuvInput[0] + i));
-	}
-*/
-	/*fileOffset = (uint64_t)dwInFrameSize;
-	result = nvSetFilePointer64(inputData, fileOffset, NULL, FILE_BEGIN);
-	if (result == INVALID_SET_FILE_POINTER)
-	{
-		return NV_ENC_ERR_INVALID_PARAM;
-	}
-	bool result2;
-	result2 = nvReadFile(inputData, yuvInput[0], anFrameSize[0], &numBytesRead, NULL);
-	printf("yuvInput[0] = %u", *yuvInput[0]);
-	printf("yuvInput[0]++ = %u", *yuvInput[0]++);
-	result2 = nvReadFile(inputData, yuvInput[1], anFrameSize[1], &numBytesRead, NULL);
-	result2 = nvReadFile(inputData, yuvInput[2], anFrameSize[2], &numBytesRead, NULL);*/
+	}*/
 	return NV_ENC_SUCCESS;
 }
 
@@ -1548,12 +1567,13 @@ NVENCSTATUS CNvEncoder::EncodeFrame(EncodeFrameConfig *pEncodeFrame, bool bFlush
 	return nvStatus;
 }
 
-NVENCSTATUS CNvEncoder::EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint32_t width, uint32_t height, NV_ENC_LOCK_BITSTREAM &lockBitstreamData)
+NVENCSTATUS CNvEncoder::EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint32_t width, uint32_t height, NV_ENC_LOCK_BITSTREAM &lockBitstreamData, EncodeBuffer *pEncodeOutBuffer, uint64_t timestamp, uint64_t duration)
 {
 	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
 	uint32_t lockedPitch = 0;
 	EncodeBuffer *pEncodeBuffer = NULL;
 	bool stop;
+
 	if (bFlush)
 	{
 		FlushEncoder2(lockBitstreamData, stop);
@@ -1572,7 +1592,8 @@ NVENCSTATUS CNvEncoder::EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlus
 	if (!pEncodeBuffer)
 	{
 		printf("ProcessOutput... \n");
-		m_pNvHWEncoder->ProcessOutput2(m_EncodeBufferQueue.GetPending(), lockBitstreamData);
+		pEncodeOutBuffer = m_EncodeBufferQueue.GetPending();
+		m_pNvHWEncoder->ProcessOutput2(pEncodeOutBuffer, lockBitstreamData);
 		pEncodeBuffer = m_EncodeBufferQueue.GetAvailable();
 	}
 
@@ -1608,18 +1629,109 @@ NVENCSTATUS CNvEncoder::EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlus
 	if (nvStatus != NV_ENC_SUCCESS)
 		return nvStatus;
 
-	nvStatus = m_pNvHWEncoder->NvEncEncodeFrame(pEncodeBuffer, NULL, width, height, (NV_ENC_PIC_STRUCT)m_uPicStruct, pEncodeFrame->qpDeltaMapArray, pEncodeFrame->qpDeltaMapArraySize, pEncodeFrame->meExternalHints, pEncodeFrame->meHintCountsPerBlock);
+	/*if (m_firstFrame)
+	{
+		NvEncPictureCommand command;
+		command.bForceIDR = true;
+		m_firstFrame = false;
+		nvStatus = m_pNvHWEncoder->NvEncEncodeFrame(pEncodeBuffer, &command, width, height, (NV_ENC_PIC_STRUCT)m_uPicStruct, pEncodeFrame->qpDeltaMapArray, pEncodeFrame->qpDeltaMapArraySize, pEncodeFrame->meExternalHints, pEncodeFrame->meHintCountsPerBlock, timestamp, duration);
+	}*/
+
+	nvStatus = m_pNvHWEncoder->NvEncEncodeFrame(pEncodeBuffer, NULL, width, height, (NV_ENC_PIC_STRUCT)m_uPicStruct, pEncodeFrame->qpDeltaMapArray, pEncodeFrame->qpDeltaMapArraySize, pEncodeFrame->meExternalHints, pEncodeFrame->meHintCountsPerBlock, timestamp, duration);
+	return nvStatus;
+}
+
+//int m_Count = 0;
+NVENCSTATUS CNvEncoder::EncodeFrame3(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint64_t inputTimestamp, uint64_t inputDuration, byte **outputData, uint32_t &outputDataSize, uint64_t &outputTimeStamp, bool &isKey)
+{
+	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+	uint32_t lockedPitch = 0;
+	EncodeBuffer *pEncodeBuffer = NULL;
+	bool stop;
+
+	if (bFlush)
+	{
+		FlushEncoder3(outputData, outputDataSize, outputTimeStamp, isKey, stop);
+		if (stop)
+			return (NVENCSTATUS)-1;
+		else
+			return NV_ENC_SUCCESS;
+	}
+
+	if (!pEncodeFrame)
+	{
+		return NV_ENC_ERR_INVALID_PARAM;
+	}
+
+	//Set buffer
+	pEncodeBuffer = m_EncodeBufferQueue.GetAvailable();
+	
+	//If encoded buffer is null
+	if (!pEncodeBuffer)
+	{
+		//Start to process output
+		printf("ProcessOutput... \n");
+		m_pNvHWEncoder->ProcessOutput3(m_EncodeBufferQueue.GetPending(), outputData, outputDataSize, outputTimeStamp, isKey);
+		pEncodeBuffer = m_EncodeBufferQueue.GetAvailable();
+	}
+
+	//Deal with input data of encoder
+	unsigned char *pInputSurface;
+
+	nvStatus = m_pNvHWEncoder->NvEncLockInputBuffer(pEncodeBuffer->stInputBfr.hInputSurface, (void**)&pInputSurface, &lockedPitch);
+	if (nvStatus != NV_ENC_SUCCESS)
+		return nvStatus;
+
+	if (pEncodeBuffer->stInputBfr.bufferFmt == NV_ENC_BUFFER_FORMAT_NV12_PL)
+	{
+		unsigned char *pInputSurfaceCh = pInputSurface + (pEncodeBuffer->stInputBfr.dwHeight*lockedPitch);
+		convertYUVpitchtoNV12(pEncodeFrame->yuv[0], pEncodeFrame->yuv[1], pEncodeFrame->yuv[2], pInputSurface, pInputSurfaceCh, m_encodeConfig.width, m_encodeConfig.height, m_encodeConfig.width, lockedPitch);
+	}
+	else if (pEncodeBuffer->stInputBfr.bufferFmt == NV_ENC_BUFFER_FORMAT_YUV444)
+	{
+		unsigned char *pInputSurfaceCb = pInputSurface + (pEncodeBuffer->stInputBfr.dwHeight * lockedPitch);
+		unsigned char *pInputSurfaceCr = pInputSurfaceCb + (pEncodeBuffer->stInputBfr.dwHeight * lockedPitch);
+		convertYUVpitchtoYUV444(pEncodeFrame->yuv[0], pEncodeFrame->yuv[1], pEncodeFrame->yuv[2], pInputSurface, pInputSurfaceCb, pInputSurfaceCr, m_encodeConfig.width, m_encodeConfig.height, m_encodeConfig.width, lockedPitch);
+	}
+	else if (pEncodeBuffer->stInputBfr.bufferFmt == NV_ENC_BUFFER_FORMAT_YUV420_10BIT)
+	{
+		unsigned char *pInputSurfaceCh = pInputSurface + (pEncodeBuffer->stInputBfr.dwHeight*lockedPitch);
+		convertYUV10pitchtoP010PL((uint16_t *)pEncodeFrame->yuv[0], (uint16_t *)pEncodeFrame->yuv[1], (uint16_t *)pEncodeFrame->yuv[2], (uint16_t *)pInputSurface, (uint16_t *)pInputSurfaceCh, m_encodeConfig.width, m_encodeConfig.height, m_encodeConfig.width, lockedPitch);
+	}
+	else
+	{
+		unsigned char *pInputSurfaceCb = pInputSurface + (pEncodeBuffer->stInputBfr.dwHeight * lockedPitch);
+		unsigned char *pInputSurfaceCr = pInputSurfaceCb + (pEncodeBuffer->stInputBfr.dwHeight * lockedPitch);
+		convertYUV10pitchtoYUV444((uint16_t *)pEncodeFrame->yuv[0], (uint16_t *)pEncodeFrame->yuv[1], (uint16_t *)pEncodeFrame->yuv[2], (uint16_t *)pInputSurface, (uint16_t *)pInputSurfaceCb, (uint16_t *)pInputSurfaceCr, m_encodeConfig.width, m_encodeConfig.height, m_encodeConfig.width, lockedPitch);
+	}
+	nvStatus = m_pNvHWEncoder->NvEncUnlockInputBuffer(pEncodeBuffer->stInputBfr.hInputSurface);
+	if (nvStatus != NV_ENC_SUCCESS)
+		return nvStatus;
+
+	/*if (m_Count == 100)
+	{
+		
+		NvEncPictureCommand command;
+		command.bForceIDR = true;
+		command.bForceIntraRefresh = false;
+		m_firstFrame = false;
+		nvStatus = m_pNvHWEncoder->NvEncEncodeFrame(pEncodeBuffer, &command, m_encodeConfig.width, m_encodeConfig.height, (NV_ENC_PIC_STRUCT)m_uPicStruct, pEncodeFrame->qpDeltaMapArray, pEncodeFrame->qpDeltaMapArraySize, pEncodeFrame->meExternalHints, pEncodeFrame->meHintCountsPerBlock, inputTimestamp, inputDuration);
+		m_Count = 0;
+	}
+	m_Count++;*/
+
+	nvStatus = m_pNvHWEncoder->NvEncEncodeFrame(pEncodeBuffer, NULL, m_encodeConfig.width, m_encodeConfig.height, (NV_ENC_PIC_STRUCT)m_uPicStruct, pEncodeFrame->qpDeltaMapArray, pEncodeFrame->qpDeltaMapArraySize, pEncodeFrame->meExternalHints, pEncodeFrame->meHintCountsPerBlock, inputTimestamp, inputDuration);
 	return nvStatus;
 }
 
 //20170622
-bool CNvEncoder::GetAPIFromManaged(HINSTANCE intPtr, MYPROC proc)
+bool CNvEncoder::GetLibraryFromManaged(HINSTANCE intPtr, MYPROC proc)
 {
 	printf("\n m_pNvHWEncoder = %p", m_pNvHWEncoder);
-	return m_pNvHWEncoder->GetAPIFromManaged(intPtr, proc);
+	return m_pNvHWEncoder->GetLibraryFromManaged(intPtr, proc);
 }
 
-bool CNvEncoder::InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFormat, int width, int height, int frameRate)
+bool CNvEncoder::InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFormat, int width, int height, int frameRate, int bitrate, int rcMode)
 {
 	uint32_t  chromaFormatIDC = 0;
 	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
@@ -1629,12 +1741,13 @@ bool CNvEncoder::InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFormat, int width
 
 	//Default m_encodeConfig
 	m_encodeConfig.endFrameIdx = INT_MAX;
-	m_encodeConfig.bitrate = 5000000;
-	m_encodeConfig.rcMode = NV_ENC_PARAMS_RC_CONSTQP;
-	m_encodeConfig.gopLength = NVENC_INFINITE_GOPLENGTH;
+	m_encodeConfig.bitrate = bitrate;
+	m_encodeConfig.rcMode = rcMode;
+	//NTSC GOP=18, fps = 29.97; PAL GOP=15 fps = 25¡C
+	m_encodeConfig.gopLength = 90; //every 3s is a group
 	m_encodeConfig.deviceType = /*NV_ENC_DX11*/NV_ENC_CUDA;
 	m_encodeConfig.codec = NV_ENC_H264;
-	m_encodeConfig.fps = 30;
+	m_encodeConfig.fps = frameRate;
 	m_encodeConfig.qp = 28;
 	m_encodeConfig.i_quant_factor = DEFAULT_I_QFACTOR;
 	m_encodeConfig.b_quant_factor = DEFAULT_B_QFACTOR;
@@ -1643,6 +1756,7 @@ bool CNvEncoder::InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFormat, int width
 	m_encodeConfig.presetGUID = NV_ENC_PRESET_DEFAULT_GUID;
 	m_encodeConfig.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
 	//m_encodeConfig.inputFormat = NV_ENC_BUFFER_FORMAT_NV12;
+	m_encodeConfig.encoderPreset = "lowLatencyHP";
 
 	m_encodeConfig.inputFormat = inputFormat;
 	m_encodeConfig.width = width;
@@ -1728,15 +1842,18 @@ bool CNvEncoder::InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFormat, int width
 	return true;
 }
 
-NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte **outputData, uint16_t &sizeOfOutput)
+NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, byte **outputData, uint32_t &sizeOfOutput, bool &isKey, uint64_t inputTimeStamp, uint64_t inputDuration, uint64_t &outputTimeStamp)
 {
-	uint8_t *yuv[3];
+	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+	byte *yuv[3];
+	//uint8_t **yuv;
 	uint32_t  chromaFormatIDC = 0;
 	uint32_t numBytesRead = 0;
 	int lumaPlaneSize = 0, chromaPlaneSize = 0;
-	yuv[0] = new(std::nothrow) uint8_t[lumaPlaneSize];
+
+	/*yuv[0] = new(std::nothrow) uint8_t[lumaPlaneSize];
 	yuv[1] = new(std::nothrow) uint8_t[chromaPlaneSize];
-	yuv[2] = new(std::nothrow) uint8_t[chromaPlaneSize];
+	yuv[2] = new(std::nothrow) uint8_t[chromaPlaneSize];*/
 
 	chromaFormatIDC = (m_encodeConfig.inputFormat == NV_ENC_BUFFER_FORMAT_YUV444 || m_encodeConfig.inputFormat == NV_ENC_BUFFER_FORMAT_YUV444_10BIT) ? 3 : 1;
 
@@ -1749,18 +1866,16 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 	lumaPlaneSize = m_encodeConfig.maxWidth * m_encodeConfig.maxHeight * (m_encodeConfig.inputFormat == NV_ENC_BUFFER_FORMAT_YUV420_10BIT || m_encodeConfig.inputFormat == NV_ENC_BUFFER_FORMAT_YUV444_10BIT ? 2 : 1);
 	chromaPlaneSize = (chromaFormatIDC == 3) ? lumaPlaneSize : (lumaPlaneSize >> 2);
 
-	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
-	NV_ENC_LOCK_BITSTREAM lockBitstreamData;
-	memset(&lockBitstreamData, 0, sizeof(lockBitstreamData));
-	SET_VER(lockBitstreamData, NV_ENC_LOCK_BITSTREAM);
-	//EncodeBuffer *pEncodeBuffer;
-
 	//Load data
 	if (inputData)
 	{
-		loadframe2(inputData, yuv, width, height, numBytesRead, m_encodeConfig.inputFormat);
+		//delete[] inputData;
+
+		loadframe2(inputData, yuv, m_encodeConfig.width, m_encodeConfig.height, m_encodeConfig.inputFormat);
 		
-		delete(inputData);
+		/*delete[] yuv[0];
+		delete[] yuv[1];
+		delete[] yuv[2];*/
 
 		EncodeFrameConfig stEncodeFrame;
 		memset(&stEncodeFrame, 0, sizeof(stEncodeFrame));
@@ -1780,7 +1895,14 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 
 		//Encode data
 		printf("EncodeFrame... \n");
-		EncodeFrame2(&stEncodeFrame, false, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData);
+		//nvStatus = EncodeFrame2(&stEncodeFrame, false, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData, pEncodeBuffer, timestamp, duration);
+
+		nvStatus = EncodeFrame3(&stEncodeFrame, false, inputTimeStamp, inputDuration, outputData, sizeOfOutput, outputTimeStamp, isKey);
+		
+		//Release YUV data
+		delete[] yuv[0];
+		delete[] yuv[1];
+		delete[] yuv[2];
 
 	//for (int i = 0; i < 10; i++)
 	//{
@@ -1799,39 +1921,66 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 
 	//printf("pEncodeBuffer->stOutputBfr.hBitstreamBuffer at CNvEncoder::ProcessData = %u \n", pEncodeBuffer->stOutputBfr.dwBitstreamBufferSize);
 
-		if (lockBitstreamData.bitstreamSizeInBytes > 0)
-		{
-			printf("lockBitstreamData.bitstreamSizeInBytes at CNvEncoder::ProcessData = %u \n", lockBitstreamData.bitstreamSizeInBytes);
-			*outputData = new byte[lockBitstreamData.bitstreamSizeInBytes];
-			//printf("lockBitstreamData.bitstreamBufferPtr = %p \n", lockBitstreamData.bitstreamBufferPtr);
-			memcpy(*outputData, lockBitstreamData.bitstreamBufferPtr, lockBitstreamData.bitstreamSizeInBytes);
-			sizeOfOutput = lockBitstreamData.bitstreamSizeInBytes;
-			//fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_pFile);
+		//EncodeFrame2
+		//if (lockBitstreamData.bitstreamSizeInBytes > 0)
+		//{
+		//	printf("lockBitstreamData.bitstreamSizeInBytes at CNvEncoder::ProcessData = %u \n", lockBitstreamData.bitstreamSizeInBytes);
+		//	*outputData = new byte[lockBitstreamData.bitstreamSizeInBytes];
+		//	//printf("lockBitstreamData.bitstreamBufferPtr = %p \n", lockBitstreamData.bitstreamBufferPtr);
+		//	memcpy(*outputData, lockBitstreamData.bitstreamBufferPtr, lockBitstreamData.bitstreamSizeInBytes);
+		//	sizeOfOutput = lockBitstreamData.bitstreamSizeInBytes;
 
-			/*for (int i = 0; i < 20; i++)
-			{
-				printf("outputBuf = %u \n", *(*outputData + i));
-			}*/
-		}
+		//	outTimeStamp = lockBitstreamData.outputTimeStamp;
+		//	//uint64_t duration = lockBitstreamData.outputDuration;
+		//	//printf("outTimeStamp = %ld", outTimeStamp);
+		//	if (lockBitstreamData.pictureType == NV_ENC_PIC_TYPE_IDR)
+		//		isKey = true;
+		//	else
+		//		isKey = false;
+
+		//	m_pNvHWEncoder->NvUncLockBitstream(pEncodeBuffer);
+
+		//	//delete lockBitstreamData.bitstreamBufferPtr;
+		//	//fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_pFile);
+
+		//	/*for (int i = 0; i < 20; i++)
+		//	{
+		//		printf("outputBuf = %u \n", *(*outputData + i));
+		//	}*/
+		//}
+
 	}
 	else
 	{
-		nvStatus = EncodeFrame2(NULL, true, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData);
+		//EncodeFrame2
+		//nvStatus = EncodeFrame2(NULL, true, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData, pEncodeBuffer);
 
-		if (lockBitstreamData.bitstreamSizeInBytes > 0)
-		{
-			printf("lockBitstreamData.bitstreamSizeInBytes at CNvEncoder::ProcessData = %u \n", lockBitstreamData.bitstreamSizeInBytes);
-			*outputData = new byte[lockBitstreamData.bitstreamSizeInBytes];
-			//printf("lockBitstreamData.bitstreamBufferPtr = %p \n", lockBitstreamData.bitstreamBufferPtr);
-			memcpy(*outputData, lockBitstreamData.bitstreamBufferPtr, lockBitstreamData.bitstreamSizeInBytes);
-			sizeOfOutput = lockBitstreamData.bitstreamSizeInBytes;
-			//fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_pFile);
+		//if (lockBitstreamData.bitstreamSizeInBytes > 0)
+		//{
+		//	printf("lockBitstreamData.bitstreamSizeInBytes at CNvEncoder::ProcessData = %u \n", lockBitstreamData.bitstreamSizeInBytes);
+		//	*outputData = new byte[lockBitstreamData.bitstreamSizeInBytes];
+		//	//printf("lockBitstreamData.bitstreamBufferPtr = %p \n", lockBitstreamData.bitstreamBufferPtr);
+		//	memcpy(*outputData, lockBitstreamData.bitstreamBufferPtr, lockBitstreamData.bitstreamSizeInBytes);
+		//	sizeOfOutput = lockBitstreamData.bitstreamSizeInBytes;
+		//	//fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_pFile);
 
-			/*for (int i = 0; i < 20; i++)
-			{
-			printf("outputBuf = %u \n", *(*outputData + i));
-			}*/
-		}
+		//	outTimeStamp = lockBitstreamData.outputTimeStamp;
+		//	//printf("outTimeStamp = %ld", outTimeStamp);
+
+		//	if (lockBitstreamData.pictureType == NV_ENC_PIC_TYPE_IDR)
+		//		isKey = true;
+		//	else
+		//		isKey = false;
+
+		//	m_pNvHWEncoder->NvUncLockBitstream(pEncodeBuffer);
+		//	//delete lockBitstreamData.bitstreamBufferPtr;
+		//	/*for (int i = 0; i < 20; i++)
+		//	{
+		//	printf("outputBuf = %u \n", *(*outputData + i));
+		//	}*/
+		//}
+
+		nvStatus = EncodeFrame3(NULL, true, inputTimeStamp, inputDuration, outputData, sizeOfOutput, outputTimeStamp, isKey);
 	}
 
 	//For output testing
@@ -1844,38 +1993,38 @@ NVENCSTATUS CNvEncoder::ProcessData(byte *inputData, int width, int height, byte
 
 	return nvStatus;
 }
-
-bool CNvEncoder::EndOfProcessData()
-{
-	bool result = false;
-	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
-	NV_ENC_LOCK_BITSTREAM lockBitstreamData;
-	memset(&lockBitstreamData, 0, sizeof(lockBitstreamData));
-	SET_VER(lockBitstreamData, NV_ENC_LOCK_BITSTREAM);
-
-	nvStatus = EncodeFrame2(NULL, true, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData);
-
-	if (nvStatus == NV_ENC_SUCCESS)
-		result =  true;
-
-	return result;
-}
+//
+//bool CNvEncoder::EndOfProcessData()
+//{
+//	bool result = false;
+//	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+//	NV_ENC_LOCK_BITSTREAM lockBitstreamData;
+//	memset(&lockBitstreamData, 0, sizeof(lockBitstreamData));
+//	SET_VER(lockBitstreamData, NV_ENC_LOCK_BITSTREAM);
+//
+//	nvStatus = EncodeFrame2(NULL, true, m_encodeConfig.width, m_encodeConfig.height, lockBitstreamData, pEncodeBuffer);
+//
+//	if (nvStatus == NV_ENC_SUCCESS)
+//		result =  true;
+//
+//	return result;
+//}
 
 bool CNvEncoder::FinalizeEncoder()
 {
 	bool result = false;
 	NVENCSTATUS nvStatus;
 
-#if defined(NV_WINDOWS)
-	if (m_stEncoderInput.enableAsyncMode)
-	{
-		if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
-		{
-			assert(0);
-			NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
-		}
-	}
-#endif 
+//#if defined(NV_WINDOWS)
+//	if (m_stEncoderInput.enableAsyncMode)
+//	{
+//		if (WaitForSingleObject(m_stEOSOutputBfr.hOutputEvent, 500) != WAIT_OBJECT_0)
+//		{
+//			assert(0);
+//			NVENCSTATUS nvStatus = NV_ENC_ERR_GENERIC;
+//		}
+//	}
+//#endif 
 
 	nvStatus = Deinitialize(m_encodeConfig.deviceType);
 	if (nvStatus == NV_ENC_SUCCESS)
@@ -1884,7 +2033,7 @@ bool CNvEncoder::FinalizeEncoder()
 }
 
 ///
-/// Comunication between C++ and C#
+/// Communication between C++ and C#
 ///
 namespace NvidiaNVENC
 {
@@ -1918,7 +2067,7 @@ namespace NvidiaNVENC
 		return m_nvEncoder->EncodeMain(0, NULL);
 	}
 
-	bool NvEncoder::InitializeNvEncoder(Guid inputFormat, int width, int height, int frameRate)
+	bool NvEncoder::InitializeNvEncoder(Guid inputFormat, int width, int height, int frameRate, int bitrate, int rcMode)
 	{
 		Guid Nv12 = Guid(0x3231564E, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
 		Guid Yv12 = Guid(0x32315659, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
@@ -1934,22 +2083,25 @@ namespace NvidiaNVENC
 			PRINTERR("Invalid media type");
 			return false;
 		}
-		return m_nvEncoder->InitilaizeNvEncoder(nVInputFormat, width, height, frameRate);;
+		return m_nvEncoder->InitilaizeNvEncoder(nVInputFormat, width, height, frameRate, bitrate, rcMode);
 	}
 
-	int NvEncoder::ProcessData(array<System::Byte> ^inputData, int width, int height, [Out] array<System::Byte> ^%outputData)
+	int NvEncoder::ProcessData(array<System::Byte> ^inputData, int width, int height, [Out] array<System::Byte> ^%outputData, [Out] bool %isKey, uint64_t timestamp, uint64_t duration, [Out] uint64_t %outTimestamp)
 	{
-		uint16_t sizeOfOutput = 0;
-		unsigned char *outputBuf = NULL /*= new unsigned char[outputData->Length]*/;
+		uint32_t sizeOfOutput = 0;
+		byte *outputBuf = NULL /*= new unsigned char[outputData->Length]*/;
 		NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+		bool isKeyTemp = false;
+		uint64_t timeTemp = 0;
 
 		if (inputData)
 		{
-			unsigned char *inputBuf = new unsigned char[inputData->Length];
+			byte *inputBuf = new unsigned char[inputData->Length];
 			Marshal::Copy(inputData, 0, IntPtr(inputBuf), inputData->Length);
 			//Marshal::Copy(outputData, 0, IntPtr(outputBuf), outputData->Length);
+			//inputData->Clear(inputData, 0, inputData->Length);
 
-			nvStatus = m_nvEncoder->ProcessData(inputBuf, width, height, &outputBuf, sizeOfOutput);
+			nvStatus = m_nvEncoder->ProcessData(inputBuf, &outputBuf, sizeOfOutput, isKeyTemp, timestamp, duration, timeTemp);
 			if (outputBuf)
 			{
 				//int size = sizeof(*outputBuf);
@@ -1957,18 +2109,20 @@ namespace NvidiaNVENC
 			
 				Marshal::Copy(IntPtr(outputBuf), outputData, 0, sizeOfOutput);
 
-				delete(outputBuf);
+				outTimestamp = timeTemp;
+
+				delete[] outputBuf;
 
 				//for (int i = 0; i < 20; i++)
 				//{
 				//	printf("outputBuf = %u \n", *(outputBuf + i));
 				//}
 			}
+			//delete[] inputBuf;
 		}
 		else
 		{
-			nvStatus = m_nvEncoder->ProcessData(NULL, width, height, &outputBuf, sizeOfOutput);
-			
+			nvStatus = m_nvEncoder->ProcessData(NULL, &outputBuf, sizeOfOutput, isKeyTemp, timestamp, duration, timeTemp);
 			if (outputBuf)
 			{
 				//int size = sizeof(*outputBuf);
@@ -1976,18 +2130,26 @@ namespace NvidiaNVENC
 
 				Marshal::Copy(IntPtr(outputBuf), outputData, 0, sizeOfOutput);
 
+				outTimestamp = timeTemp;
+
+				delete[] outputBuf;
+
 				//for (int i = 0; i < 20; i++)
 				//{
 				//	printf("outputBuf = %u \n", *(outputBuf + i));
 				//}
-
-				delete(outputBuf);
 			}
 		}
+
+		if (isKeyTemp)
+			isKey = true;
+		else
+			isKey = false;
+
 		return nvStatus;
 	}
 
-	bool NvEncoder::EndOfProcessData()
+	bool NvEncoder::StopProcessData()
 	{
 		bool result = false;
 		NVENCSTATUS nvstatus = m_nvEncoder->NvEncFlushEncoderQueue();
@@ -2003,11 +2165,11 @@ namespace NvidiaNVENC
 		return m_nvEncoder->FinalizeEncoder();
 	}
 
-	bool NvEncoder::GetAPIFromManaged(IntPtr intPtr, IntPtr proc)
+	bool NvEncoder::GetLibraryFromManaged(IntPtr intPtr, IntPtr proc)
 	{
 		void *temp = intPtr.ToPointer();
 		void *temp2 = proc.ToPointer();
-		m_nvEncoder->GetAPIFromManaged((HINSTANCE)temp, (MYPROC)temp2);
+		m_nvEncoder->GetLibraryFromManaged((HINSTANCE)temp, (MYPROC)temp2);
 
 		return true;
 	}

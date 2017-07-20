@@ -1,3 +1,9 @@
+////////////////////////////////////////////////////////////////////////////
+// Hereby to notify that
+//  "This library contains source code provided by NVIDIA Corporation."
+//														2017/07/17 Barry
+////////////////////////////////////////////////////////////////////////////
+
 // NvidiaNVENC.h
 #pragma once
 
@@ -123,13 +129,22 @@ public:
 	virtual ~CNvEncoder();
 
 	int                                                  EncodeMain(int argc, char **argv);
+	
 	//20170622
-	bool											 GetAPIFromManaged(HINSTANCE intPtr, MYPROC proc);
-	bool InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFomat, int width, int height, int frameRate);
-	NVENCSTATUS ProcessData(byte *inputData, int width, int height, byte **outputData, uint16_t &sizeOfOutput);
-	NVENCSTATUS EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint32_t width, uint32_t height, NV_ENC_LOCK_BITSTREAM &lockBitstreamData);
+	bool GetLibraryFromManaged(HINSTANCE intPtr, MYPROC proc);
+	bool InitilaizeNvEncoder(NV_ENC_BUFFER_FORMAT inputFomat, int width, int height, int frameRate = 30, int bitrate = 5000000, int rcMode = NV_ENC_PARAMS_RC_CONSTQP);
+	NVENCSTATUS ProcessData(byte *inputData, byte **outputData, uint32_t &sizeOfOutput, 
+							bool &isKey, uint64_t timestamp, uint64_t duration, uint64_t &outTimeStamp);
+
+	NVENCSTATUS EncodeFrame2(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint32_t width, uint32_t height, 
+			NV_ENC_LOCK_BITSTREAM &lockBitstreamData, EncodeBuffer *pEncodeBuffer, uint64_t timestamp = 0, uint64_t duration = 0);
+	NVENCSTATUS EncodeFrame3(EncodeFrameConfig *pEncodeFrame, bool bFlush, uint64_t inputTimestamp, uint64_t inputDuration, byte **outputData, uint32_t &outputDataSize, uint64_t &outputTimeStamp, bool &isKey);
+	
 	bool EndOfProcessData();
+
 	NVENCSTATUS FlushEncoder2(NV_ENC_LOCK_BITSTREAM &lockBitstreamData, bool &stop);
+	NVENCSTATUS FlushEncoder3(byte **outputData, uint32_t &outputDataSize, uint64_t &outputTimeStamp, bool &isKey, bool &stop);
+
 	NVENCSTATUS NvEncFlushEncoderQueue();
 	bool FinalizeEncoder();
 protected:
@@ -137,6 +152,8 @@ protected:
 	uint32_t                                             m_uEncodeBufferCount;
 	uint32_t                                             m_uPicStruct;
 	void*                                                m_pDevice;
+	//20170628
+	bool m_firstFrame;
 #if defined(NV_WINDOWS)
 	IDirect3D9                                          *m_pD3D;
 #endif
@@ -172,8 +189,9 @@ protected:
 // NVEncodeAPI entry point
 typedef NVENCSTATUS(NVENCAPI *MYPROC)(NV_ENCODE_API_FUNCTION_LIST*);
 
+///20170626
 ///
-///
+/// NvidiaNVENC is a class to link between CNvEncoder and C# 
 ///
 using namespace System;
 using namespace System::Runtime::InteropServices;
@@ -198,10 +216,10 @@ namespace NvidiaNVENC {
 		NvEncoder();
 		~NvEncoder();
 		int EncodeMain();
-		bool GetAPIFromManaged(IntPtr intPtr, IntPtr proc);
-		bool InitializeNvEncoder(Guid inputFormat, int width, int height, int frameRate);
-		int ProcessData(array<System::Byte> ^inputData, int width, int height, [Out] array<System::Byte> ^%outputData);
-		bool EndOfProcessData();
+		bool GetLibraryFromManaged(IntPtr intPtr, IntPtr proc);
+		bool InitializeNvEncoder(Guid inputFormat, int width, int height, int frameRate, int bitrate, int rcMode);
+		int ProcessData(array<System::Byte> ^inputData, int width, int height, [Out] array<System::Byte> ^%outputData, [Out] bool %isKey, uint64_t timestamp, uint64_t duration, [Out] uint64_t %outTimeStamp);
+		bool StopProcessData();
 		bool FinalizeEncoder();
 
 	private:

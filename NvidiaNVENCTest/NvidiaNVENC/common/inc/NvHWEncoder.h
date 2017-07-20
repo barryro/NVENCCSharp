@@ -180,7 +180,6 @@ protected:
     NV_ENC_CONFIG                                        m_stEncodeConfig;
 
 	MYPROC												m_nvEncodeAPICreateInstance;
-
 public:
     NVENCSTATUS NvEncOpenEncodeSession(void* device, uint32_t deviceType);
     NVENCSTATUS NvEncGetEncodeGUIDCount(uint32_t* encodeGUIDCount);
@@ -229,7 +228,7 @@ public:
                                                                           uint32_t width, uint32_t height,
                                                                           NV_ENC_PIC_STRUCT ePicStruct = NV_ENC_PIC_STRUCT_FRAME,
                                                                           int8_t *qpDeltaMapArray = NULL, uint32_t qpDeltaMapArraySize = 0, NVENC_EXTERNAL_ME_HINT *meExternalHints = NULL, 
-                                                                          NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE *meHintCountsPerBlock = NULL);
+																		  NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE *meHintCountsPerBlock = NULL, uint64_t timestamp = 0, uint64_t duration = 0);
     NVENCSTATUS                                          CreateEncoder(EncodeConfig *pEncCfg);
     GUID                                                 GetPresetGUID(char* encoderPreset, int codec);
     NVENCSTATUS                                          ProcessOutput(const EncodeBuffer *pEncodeBuffer);
@@ -240,9 +239,8 @@ public:
     static NVENCSTATUS                                   ParseArguments(EncodeConfig *encodeConfig, int argc, char *argv[]);
 
 	//20170622
-	bool GetAPIFromManaged(HINSTANCE intPtr, MYPROC proc);
+	bool GetLibraryFromManaged(HINSTANCE intPtr, MYPROC proc);
 	NVENCSTATUS CreateEncoder2(EncodeConfig *pEncCfg);
 	NVENCSTATUS ProcessOutput2(const EncodeBuffer *pEncodeBuffer, NV_ENC_LOCK_BITSTREAM &lockBitstreamData);
-	bool NvEncLockBitstream(NV_ENC_LOCK_BITSTREAM lockBitstreamData);
-	bool NvUncLockBitstream(const EncodeBuffer *pEncodeBuffer, NV_ENC_LOCK_BITSTREAM lockBitstreamData);
+	NVENCSTATUS ProcessOutput3(const EncodeBuffer *pEncodeBuffer, byte **data, uint32_t &dataSize, uint64_t &timeStamp, bool &isKey);
 };

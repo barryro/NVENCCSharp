@@ -129,7 +129,7 @@ namespace NvidiaNVENCTest
                         {
                             byte[] inputData = null;
                             byte[] outputData = null;
-
+                            bool isKey = false;
                             //HResult ReadSample(int dwStreamIndex, MF_SOURCE_READER_CONTROL_FLAG dwControlFlags, out int pdwActualStreamIndex, out MF_SOURCE_READER_FLAG pdwStreamFlags, out long pllTimestamp, out IMFSample ppSample);
                             ppSourceReader.ReadSample(1, MF_SOURCE_READER_CONTROL_FLAG.None, out pdwActualStreamIndex, out pdwStreamFlags, out pllTimestamp, out ppSample);
                             if (pdwStreamFlags == MF_SOURCE_READER_FLAG.EndOfStream)

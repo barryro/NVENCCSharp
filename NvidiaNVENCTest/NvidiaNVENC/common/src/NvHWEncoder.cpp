@@ -1072,6 +1072,7 @@ NVENCSTATUS CNvHWEncoder::CreateEncoder2(EncodeConfig *pEncCfg)
 	}
 	memcpy(&m_stEncodeConfig, &stPresetCfg.presetCfg, sizeof(NV_ENC_CONFIG));
 
+	m_stEncodeConfig.profileGUID = NV_ENC_H264_PROFILE_BASELINE_GUID;
 	m_stEncodeConfig.gopLength = pEncCfg->gopLength;
 	m_stEncodeConfig.frameIntervalP = pEncCfg->numB + 1;
 	if (pEncCfg->pictureStruct == NV_ENC_PIC_STRUCT_FRAME)
@@ -1181,6 +1182,7 @@ NVENCSTATUS CNvHWEncoder::CreateEncoder2(EncodeConfig *pEncCfg)
 	}
 	if (pEncCfg->codec == NV_ENC_H264)
 	{
+		int temp = pEncCfg->gopLength;
 		m_stEncodeConfig.encodeCodecConfig.h264Config.idrPeriod = pEncCfg->gopLength;
 	}
 	else if (pEncCfg->codec == NV_ENC_HEVC)
@@ -1353,7 +1355,7 @@ NVENCSTATUS CNvHWEncoder::ProcessOutput(const EncodeBuffer *pEncodeBuffer)
         fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_fOutput);
         nvStatus = m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
 
-		delete(outputData);
+		delete[] outputData;
     }
     else
     {
@@ -1399,8 +1401,64 @@ NVENCSTATUS CNvHWEncoder::ProcessOutput2(const EncodeBuffer *pEncodeBuffer, NV_E
 	{
 		//printf("fwrite... \n");
 		//fwrite(lockBitstreamData.bitstreamBufferPtr, 1, lockBitstreamData.bitstreamSizeInBytes, m_fOutput);
-		nvStatus = m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
+		//nvStatus = m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
 		//printf("pEncodeBuffer->stOutputBfr.hBitstreamBuffer at CNvHWEncoder::ProcessOutput2 \n", pEncodeBuffer->stOutputBfr.dwBitstreamBufferSize);
+	}
+	else
+	{
+		PRINTERR("lock bitstream function failed \n");
+	}
+
+	return nvStatus;
+}
+
+NVENCSTATUS CNvHWEncoder::ProcessOutput3(const EncodeBuffer *pEncodeBuffer, byte **data, uint32_t &dataSize, uint64_t &timeStamp, bool &isKey)
+{
+	NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
+
+	if (pEncodeBuffer->stOutputBfr.hBitstreamBuffer == NULL && pEncodeBuffer->stOutputBfr.bEOSFlag == FALSE)
+	{
+		return NV_ENC_ERR_INVALID_PARAM;
+	}
+
+	if (pEncodeBuffer->stOutputBfr.bWaitOnEvent == TRUE)
+	{
+		if (!pEncodeBuffer->stOutputBfr.hOutputEvent)
+		{
+			return NV_ENC_ERR_INVALID_PARAM;
+		}
+#if defined(NV_WINDOWS)
+		WaitForSingleObject(pEncodeBuffer->stOutputBfr.hOutputEvent, INFINITE);
+#endif
+	}
+
+	if (pEncodeBuffer->stOutputBfr.bEOSFlag)
+		return NV_ENC_SUCCESS;
+
+	nvStatus = NV_ENC_SUCCESS;
+	NV_ENC_LOCK_BITSTREAM lockBitstreamData;
+	memset(&lockBitstreamData, 0, sizeof(lockBitstreamData));
+	SET_VER(lockBitstreamData, NV_ENC_LOCK_BITSTREAM);
+	lockBitstreamData.outputBitstream = pEncodeBuffer->stOutputBfr.hBitstreamBuffer;
+	lockBitstreamData.doNotWait = false;
+
+	nvStatus = m_pEncodeAPI->nvEncLockBitstream(m_hEncoder, &lockBitstreamData);
+	//printf("lockBitstreamData.bitstreamSizeInBytes at CNvHWEncoder::ProcessOutput2 = %u \n", lockBitstreamData.bitstreamSizeInBytes);
+	if (nvStatus == NV_ENC_SUCCESS)
+	{
+		printf("Process data... \n");
+
+		dataSize = lockBitstreamData.bitstreamSizeInBytes;
+		*data = new byte[dataSize];
+		memcpy(*data, lockBitstreamData.bitstreamBufferPtr, dataSize);
+		timeStamp = lockBitstreamData.outputTimeStamp;
+
+		if (lockBitstreamData.pictureType == NV_ENC_PIC_TYPE_IDR)
+			isKey = true;
+		else
+			isKey = false;
+
+		nvStatus = m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
 	}
 	else
 	{
@@ -1537,7 +1595,7 @@ NVENCSTATUS CNvHWEncoder::Initialize(void* device, NV_ENC_DEVICE_TYPE deviceType
 NVENCSTATUS CNvHWEncoder::NvEncEncodeFrame(EncodeBuffer *pEncodeBuffer, NvEncPictureCommand *encPicCommand,
                                            uint32_t width, uint32_t height, NV_ENC_PIC_STRUCT ePicStruct,
                                            int8_t *qpDeltaMapArray, uint32_t qpDeltaMapArraySize, 
-                                           NVENC_EXTERNAL_ME_HINT *meExternalHints, NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE meHintCountsPerBlock[])
+										   NVENC_EXTERNAL_ME_HINT *meExternalHints, NVENC_EXTERNAL_ME_HINT_COUNTS_PER_BLOCKTYPE meHintCountsPerBlock[], uint64_t timestamp, uint64_t duration)
 {
     NVENCSTATUS nvStatus = NV_ENC_SUCCESS;
     NV_ENC_PIC_PARAMS encPicParams;
@@ -1552,7 +1610,8 @@ NVENCSTATUS CNvHWEncoder::NvEncEncodeFrame(EncodeBuffer *pEncodeBuffer, NvEncPic
     encPicParams.inputHeight = height;
     encPicParams.outputBitstream = pEncodeBuffer->stOutputBfr.hBitstreamBuffer;
     encPicParams.completionEvent = pEncodeBuffer->stOutputBfr.hOutputEvent;
-    encPicParams.inputTimeStamp = m_EncodeIdx;
+    encPicParams.inputTimeStamp = timestamp;
+	encPicParams.inputDuration = duration;
     encPicParams.pictureStruct = ePicStruct;
     encPicParams.qpDeltaMap = qpDeltaMapArray;
     encPicParams.qpDeltaMapSize = qpDeltaMapArraySize;
@@ -1619,10 +1678,12 @@ NVENCSTATUS CNvHWEncoder::NvEncEncodeFrame(EncodeBuffer *pEncodeBuffer, NvEncPic
         return nvStatus;
     }
 
-    m_EncodeIdx++;
+    //m_EncodeIdx++;
 
     return NV_ENC_SUCCESS;
 }
+
+
 
 NVENCSTATUS CNvHWEncoder::NvEncFlushEncoderQueue(void *hEOSEvent)
 {
@@ -1987,8 +2048,8 @@ NVENCSTATUS CNvHWEncoder::ParseArguments(EncodeConfig *encodeConfig, int argc, c
     return NV_ENC_SUCCESS;
 }
 
-//20170622
-bool  CNvHWEncoder::GetAPIFromManaged(HINSTANCE intPtr, MYPROC proc)
+//20170622 Barry: Can get library from managed code (C#)
+bool  CNvHWEncoder::GetLibraryFromManaged(HINSTANCE intPtr, MYPROC proc)
 {
 	//m_hinstLib = LoadLibrary(TEXT("nvEncodeAPI.dll"));
 	printf("\n m_hinstLib = %p, before GetAPIFromManaged", m_hinstLib);
@@ -2000,16 +2061,5 @@ bool  CNvHWEncoder::GetAPIFromManaged(HINSTANCE intPtr, MYPROC proc)
 	m_nvEncodeAPICreateInstance = proc;
 	printf("\n m_nvEncodeAPICreateInstance = %p", m_nvEncodeAPICreateInstance);
 
-	return true;
-}
-
-bool CNvHWEncoder::NvEncLockBitstream(NV_ENC_LOCK_BITSTREAM lockBitstreamData)
-{
-	m_pEncodeAPI->nvEncLockBitstream(m_hEncoder, &lockBitstreamData);
-	return true;
-}
-bool CNvHWEncoder::NvUncLockBitstream(const EncodeBuffer *pEncodeBuffer, NV_ENC_LOCK_BITSTREAM lockBitstreamData)
-{
-	m_pEncodeAPI->nvEncUnlockBitstream(m_hEncoder, pEncodeBuffer->stOutputBfr.hBitstreamBuffer);
 	return true;
 }
